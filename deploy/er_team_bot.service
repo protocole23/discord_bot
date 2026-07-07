@@ -1,0 +1,16 @@
+[Unit]
+Description=Eternal Return Team Bot
+After=network.target
+
+[Service]
+# 실제 서버 유저명/경로에 맞게 수정하세요
+User=ubuntu
+WorkingDirectory=/home/ubuntu/er_team_bot
+ExecStart=/home/ubuntu/er_team_bot/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

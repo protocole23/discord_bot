@@ -1,0 +1,7 @@
+venv
+__pycache__
+.pyc
+.env
+
+# playwright 브라우저 캐시 등
+.cache
