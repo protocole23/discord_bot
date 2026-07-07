@@ -1,4 +1,3 @@
-import random
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -59,7 +58,7 @@ def build_open_embed(session: MatchSession) -> discord.Embed:
         description=(
             f"**{session.map_name}는 {session.capacity}명 모집중**\n\n"
             f"`/내전신청 닉네임:본인 이터널리턴 닉네임` 으로 신청해주세요.\n"
-            f"인원이 모이면 이 메시지의 **팀편성 버튼**을 눌러 팀을 나눌 수 있어요."   
+            f"인원이 모이면 이 메시지의 **팀편성 버튼**을 눌러 팀을 나눌 수 있어요."
         ),
         color=discord.Color.blue() if not session.is_full else discord.Color.gold(),
     )
@@ -298,8 +297,8 @@ class MatchCog(commands.Cog):
             pass
 
     맵선택 = [
-        app_commands.Choice(name="루미아섬", value="루미아섬"),
-        app_commands.Choice(name="코발트", value="코발트"),
+        app_commands.Choice(name="루미아섬 (24명 모집)", value="루미아섬"),
+        app_commands.Choice(name="코발트 (8명 모집)", value="코발트"),
     ]
 
     # ---------------------------------------------------------------
@@ -518,40 +517,6 @@ class MatchCog(commands.Cog):
         await delete_session_messages(self.bot, session, interaction.guild)
         session_manager.cancel(interaction.guild_id)
         await interaction.followup.send(f"🏁 {session.map_name} 내전이 종료됐어요. 수고하셨습니다!")
-
-    # ---------------------------------------------------------------
-    @app_commands.command(name="테스트더미추가", description="[테스트용] 가짜 신청자를 채워서 팀편성을 미리 확인합니다. (관리자 전용)")
-    @app_commands.describe(인원수="추가할 가짜 신청자 수 (정원까지만 채워짐)")
-    async def add_dummy_applicants(self, interaction: discord.Interaction, 인원수: int):
-        if not is_admin(interaction):
-            await interaction.response.send_message("관리자만 사용할 수 있어요.", ephemeral=True)
-            return
-
-        session = session_manager.get(interaction.guild_id)
-        if session is None or session.closed:
-            await interaction.response.send_message("현재 진행 중인 내전이 없어요.", ephemeral=True)
-            return
-
-        added = 0
-        for _ in range(인원수):
-            if session.is_full:
-                break
-            dummy_id = -(len(session.applicants) + 1) - random.randint(0, 100000)
-            dummy_rp = random.randint(0, 3000)
-            session.applicants[dummy_id] = Applicant(
-                discord_id=dummy_id,
-                display_name=f"더미{added+1}",
-                nickname=f"더미유저{added+1}",
-                tier="테스트",
-                rp=dummy_rp,
-            )
-            added += 1
-
-        await interaction.response.send_message(
-            f"🧪 더미 신청자 {added}명 추가됨. 현재 인원: {session.current_count}/{session.capacity}",
-            ephemeral=True,
-        )
-        await refresh_announce_message(self.bot, session)
 
 
 async def setup(bot: commands.Bot):
