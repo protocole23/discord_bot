@@ -57,9 +57,9 @@ def build_open_embed(session: MatchSession) -> discord.Embed:
     embed = discord.Embed(
         title=f"🎮 내전 신청 중 - {session.map_name}",
         description=(
-            f"팀당 **{session.team_size}명** x **{session.team_count}팀** = 총 **{session.capacity}명** 모집\n\n"
+            f"**{session.map_name}는 {session.capacity}명 모집중**\n\n"
             f"`/내전신청 닉네임:본인 이터널리턴 닉네임` 으로 신청해주세요.\n"
-            f"인원이 모이면 이 메시지의 **팀편성 버튼**을 눌러 팀을 나눌 수 있어요."
+            f"인원이 모이면 이 메시지의 **팀편성 버튼**을 눌러 팀을 나눌 수 있어요."   
         ),
         color=discord.Color.blue() if not session.is_full else discord.Color.gold(),
     )
@@ -298,8 +298,8 @@ class MatchCog(commands.Cog):
             pass
 
     맵선택 = [
-        app_commands.Choice(name="루미아섬 (3인 x 8팀 = 24명)", value="루미아섬"),
-        app_commands.Choice(name="코발트 (4인 x 2팀 = 8명)", value="코발트"),
+        app_commands.Choice(name="루미아섬", value="루미아섬"),
+        app_commands.Choice(name="코발트", value="코발트"),
     ]
 
     # ---------------------------------------------------------------
