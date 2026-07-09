@@ -13,6 +13,7 @@ import re
 import asyncio
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
+import config
 from .base import RankProvider, RankResult, RankProviderError
 
 DAKGG_URL = "https://dak.gg/er/players/{nickname}?hl=ko&gameMode=RANK"
@@ -68,9 +69,10 @@ class DakggProvider(RankProvider):
                 if "찾을 수 없" in body_text or "No results" in body_text or "not found" in body_text.lower():
                     raise RankProviderError(f"닉네임 '{nickname}' 을(를) dak.gg에서 찾을 수 없습니다.")
 
-                # dak.gg가 캐시해둔 전적이 오래됐을 수 있으므로, 새로고침 버튼이 있으면 눌러서
-                # 최신화를 시도한다. 버튼이 없거나 실패해도 원래 텍스트로 그냥 진행한다.
-                body_text = await self._try_refresh(page, body_text)
+                # dak.gg가 캐시해둔 전적이 오래됐을 수 있으므로, 설정이 켜져있으면 "전적 갱신" 버튼을
+                # 눌러서 최신화를 시도한다 (최대 몇 초 더 걸림). 꺼져있으면 그냥 현재 텍스트로 진행.
+                if config.DAKGG_AUTO_REFRESH:
+                    body_text = await self._try_refresh(page, body_text)
 
                 return self._extract_rank_from_text(nickname, body_text)
             finally:
@@ -97,9 +99,9 @@ class DakggProvider(RankProvider):
                     # 버튼이 비활성화(쿨다운)되어 클릭 자체가 안 되는 경우 -> 기존 값 사용
                     continue
 
-                # 갱신은 dak.gg가 실제로 게임 서버에 재조회하는 작업이라 몇 초~십수 초 걸릴 수 있음.
-                # 최대 약 15초간 텍스트 변화(=갱신 완료)를 기다리고, 쿨다운 안내가 뜨면 바로 포기.
-                for _ in range(30):  # 최대 약 15초 (0.5초 x 30)
+                # 갱신은 dak.gg가 실제로 게임 서버에 재조회하는 작업이라 몇 초 걸릴 수 있음.
+                # 최대 약 5초간 텍스트 변화(=갱신 완료)를 기다리고, 쿨다운 안내가 뜨면 바로 포기.
+                for _ in range(10):  # 최대 약 5초 (0.5초 x 10)
                     await asyncio.sleep(0.5)
                     new_text = await page.inner_text("body")
                     if any(hint in new_text for hint in cooldown_hints):
