@@ -13,6 +13,11 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 # 나중에 API 키 발급받으면 이 값만 "official" 로 바꾸면 됨.
 RANK_SOURCE = os.getenv("RANK_SOURCE", "dakgg").lower()
 
+# dak.gg 크롤링 시 "전적 갱신" 버튼 자동 클릭 시도 여부.
+# 최신 데이터를 가져오려는 기능이지만, 최대 몇 초씩 추가로 기다려야 해서 느려짐.
+# 속도가 더 중요하면(특히 Render 무료 티어처럼 자원이 적은 환경) false로 끄는 걸 추천.
+DAKGG_AUTO_REFRESH = os.getenv("DAKGG_AUTO_REFRESH", "true").lower() == "true"
+
 # 이터널리턴 공식 오픈 API 키 (developer.eternalreturn.io 에서 발급)
 OFFICIAL_API_KEY = os.getenv("OFFICIAL_API_KEY", "")
 
