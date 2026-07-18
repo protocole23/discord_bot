@@ -1,4 +1,3 @@
-import math
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -98,11 +97,18 @@ async def refresh_announce_message(bot: commands.Bot, session: MatchSession):
 
 
 def regenerate_assignment(session: MatchSession):
-    """session.balance_method / effective_team_size 에 맞는 방식으로 팀을 다시 짜서
-    session.team_assignment 를 갱신한다. 실제 팀 개수는 신청 인원과 팀당 인원수로 계산한다."""
+    """session.balance_method 에 맞는 방식으로 팀을 다시 짜서 session.team_assignment 를 갱신한다.
+    팀 개수는 신청 인원을 팀당 인원수로 나눈 올림값으로 동적 계산하되, 맵 최대 팀 수(session.team_count)를 넘지 않는다.
+    예) 루미아섬 스쿼드(3인): 7명 -> ceil(7/3)=3팀, 24명 -> ceil(24/3)=8팀
+    모드(솔로/듀오/스쿼드)는 팀당 인원수(team_size)와 정원(capacity)에 영향을 준다."""
+    import math
+
     applicants = list(session.applicants.values())
     team_size = session.effective_team_size or session.team_size
-    team_count = max(1, math.ceil(len(applicants) / team_size)) if applicants else session.team_count
+    if applicants:
+        team_count = min(math.ceil(len(applicants) / team_size), session.team_count)
+    else:
+        team_count = 1
     session.formed_team_count = team_count
 
     if session.balance_method == "random":
@@ -219,9 +225,9 @@ class TeamModeSelect(discord.ui.Select):
     def __init__(self, guild_id: int):
         self.guild_id = guild_id
         options = [
-            discord.SelectOption(label="솔로 (1인 x 24팀)", value="1", description="혼자서 24팀"),
-            discord.SelectOption(label="듀오 (2인 x 12팀)", value="2", description="2인 12팀"),
-            discord.SelectOption(label="스쿼드 (3인 x 8팀)", value="3", description="3인 8팀 (기본)", default=True),
+            discord.SelectOption(label="솔로 (1인 x 8팀 = 8명)", value="1", description="1인 8팀"),
+            discord.SelectOption(label="듀오 (2인 x 8팀 = 16명)", value="2", description="2인 8팀"),
+            discord.SelectOption(label="스쿼드 (3인 x 8팀 = 24명)", value="3", description="3인 8팀 (기본)", default=True),
         ]
         super().__init__(placeholder="편성 모드 선택 (기본: 스쿼드)", options=options, min_values=1, max_values=1)
 
@@ -240,6 +246,7 @@ class TeamModeSelect(discord.ui.Select):
         await interaction.response.send_message(
             f"✅ 편성 모드를 **{mode_label}**로 설정했어요. 이제 팀편성 버튼을 눌러주세요.", ephemeral=True
         )
+        await refresh_announce_message(interaction.client, session)
 
 
 class OpenMatchView(discord.ui.View):
