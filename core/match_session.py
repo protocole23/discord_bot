@@ -27,12 +27,18 @@ class MatchSession:
     team_channel_id: Optional[int] = None             # 팀편성 결과 메시지 채널
     team_message_id: Optional[int] = None             # 팀편성 결과 메시지 ID (재편성/수동이동 시 수정용)
 
+    effective_team_size: Optional[int] = None   # 루미아섬 솔로(1)/듀오(2)/스쿼드(3) 선택값. None이면 team_size 기본값 사용
+    formed_team_count: Optional[int] = None     # 마지막으로 편성했을 때 실제 사용된 팀 개수 (수동이동 범위 검증 등에 사용)
+
     scheduled_time: Optional[datetime.datetime] = None  # 내전 시작 예정 시각 (KST, tz-aware)
     reminder_minutes: Optional[int] = None              # 시작 몇 분 전에 알림 보낼지
     reminder_sent: bool = False                          # 알림 중복 발송 방지
     discord_event_id: Optional[int] = None               # 디스코드 자체 일정(이벤트) ID
     reminder_channel_id: Optional[int] = None             # 알림 메시지가 올라간 채널 (취소/종료 시 삭제용)
     reminder_message_id: Optional[int] = None             # 알림 메시지 ID (취소/종료 시 삭제용)
+    start_notified: bool = False                           # 내전 시작 시각 알림 중복 발송 방지
+    start_channel_id: Optional[int] = None                 # 내전 시작 알림 메시지 채널 (취소/종료 시 삭제용)
+    start_message_id: Optional[int] = None                 # 내전 시작 알림 메시지 ID (취소/종료 시 삭제용)
 
     @property
     def capacity(self) -> int:

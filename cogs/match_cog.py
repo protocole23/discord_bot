@@ -1,3 +1,4 @@
+import math
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -22,6 +23,7 @@ log = logging.getLogger("er_team_bot.match_cog")
 KST = ZoneInfo("Asia/Seoul")
 
 METHOD_LABELS = {"rank": "티어순 (RP 기준)", "random": "랜덤"}
+MODE_LABELS = {1: "솔로 (1인)", 2: "듀오 (2인)", 3: "스쿼드 (3인)"}
 
 
 def parse_schedule(date_str: str, time_str: str) -> datetime.datetime:
@@ -96,22 +98,31 @@ async def refresh_announce_message(bot: commands.Bot, session: MatchSession):
 
 
 def regenerate_assignment(session: MatchSession):
-    """session.balance_method 에 맞는 방식으로 팀을 다시 짜서 session.team_assignment 를 갱신"""
+    """session.balance_method / effective_team_size 에 맞는 방식으로 팀을 다시 짜서
+    session.team_assignment 를 갱신한다. 실제 팀 개수는 신청 인원과 팀당 인원수로 계산한다."""
     applicants = list(session.applicants.values())
+    team_size = session.effective_team_size or session.team_size
+    team_count = max(1, math.ceil(len(applicants) / team_size)) if applicants else session.team_count
+    session.formed_team_count = team_count
+
     if session.balance_method == "random":
-        teams = random_draft(applicants, session.team_count)
+        teams = random_draft(applicants, team_count)
     else:
-        teams = snake_draft(applicants, session.team_count)
+        teams = snake_draft(applicants, team_count)
     session.team_assignment = teams_to_assignment(teams)
 
 
 def build_team_embed(session: MatchSession) -> discord.Embed:
     """session.team_assignment 기준으로 팀편성 결과 임베드를 만든다"""
-    teams = assignment_to_teams(session.team_assignment, session.applicants, session.team_count)
+    team_count = session.formed_team_count or session.team_count
+    teams = assignment_to_teams(session.team_assignment, session.applicants, team_count)
     method_label = METHOD_LABELS.get(session.balance_method, session.balance_method)
 
+    team_size = session.effective_team_size or session.team_size
+    mode_label = MODE_LABELS.get(team_size, f"{team_size}인")
+
     embed = discord.Embed(
-        title=f"🧩 팀 편성 - {session.map_name} ({session.current_count}명, 방식: {method_label})",
+        title=f"🧩 팀 편성 - {session.map_name} ({session.current_count}명, {mode_label}, 방식: {method_label})",
         color=discord.Color.blue(),
     )
     for team in teams:
@@ -123,7 +134,7 @@ def build_team_embed(session: MatchSession) -> discord.Embed:
         )
 
     embed.set_footer(
-        text="🔀 다시 편성 버튼으로 재편성 가능 / /수동이동 으로 개별 조정 가능 / 다음 판은 개설 메시지의 팀편성 버튼을 다시 눌러주세요"
+        text="🔀 다시 편성 / ❌ 편성 취소 버튼 사용 가능 / /수동이동 으로 개별 조정 가능"
     )
     return embed
 
@@ -179,6 +190,7 @@ async def delete_session_messages(bot: commands.Bot, session: MatchSession, guil
         ("announce", session.announce_channel_id, session.announce_message_id),
         ("team", session.team_channel_id, session.team_message_id),
         ("reminder", session.reminder_channel_id, session.reminder_message_id),
+        ("start_notice", session.start_channel_id, session.start_message_id),
     ]
     for label, channel_id, message_id in targets:
         if not channel_id or not message_id:
@@ -201,13 +213,44 @@ async def delete_session_messages(bot: commands.Bot, session: MatchSession, guil
             log.warning(f"[내전정리] 디스코드 이벤트 삭제 실패: {e}")
 
 
-class OpenMatchView(discord.ui.View):
-    """/내전개설 안내 메시지에 붙는 팀편성 버튼 (티어순/랜덤)"""
+class TeamModeSelect(discord.ui.Select):
+    """루미아섬 전용: 솔로(1인)/듀오(2인)/스쿼드(3인) 모드 선택 드롭다운"""
 
-    def __init__(self, guild_id: int, bot: commands.Bot):
+    def __init__(self, guild_id: int):
+        self.guild_id = guild_id
+        options = [
+            discord.SelectOption(label="솔로 (1인 x 24팀)", value="1", description="혼자서 24팀"),
+            discord.SelectOption(label="듀오 (2인 x 12팀)", value="2", description="2인 12팀"),
+            discord.SelectOption(label="스쿼드 (3인 x 8팀)", value="3", description="3인 8팀 (기본)", default=True),
+        ]
+        super().__init__(placeholder="편성 모드 선택 (기본: 스쿼드)", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not is_admin(interaction):
+            await interaction.response.send_message("관리자만 사용할 수 있어요.", ephemeral=True)
+            return
+
+        session = session_manager.get(self.guild_id)
+        if session is None or session.closed:
+            await interaction.response.send_message("현재 진행 중인 내전이 없어요.", ephemeral=True)
+            return
+
+        session.effective_team_size = int(self.values[0])
+        mode_label = MODE_LABELS.get(session.effective_team_size, f"{session.effective_team_size}인")
+        await interaction.response.send_message(
+            f"✅ 편성 모드를 **{mode_label}**로 설정했어요. 이제 팀편성 버튼을 눌러주세요.", ephemeral=True
+        )
+
+
+class OpenMatchView(discord.ui.View):
+    """/내전개설 안내 메시지에 붙는 팀편성 버튼 (티어순/랜덤) + 루미아섬 모드선택"""
+
+    def __init__(self, guild_id: int, bot: commands.Bot, map_name: str = None):
         super().__init__(timeout=None)
         self.guild_id = guild_id
         self.bot = bot
+        if map_name == "루미아섬":
+            self.add_item(TeamModeSelect(guild_id))
 
     @discord.ui.button(label="📊 티어순 팀편성", style=discord.ButtonStyle.primary)
     async def form_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -225,7 +268,7 @@ class OpenMatchView(discord.ui.View):
 
 
 class TeamFormView(discord.ui.View):
-    """팀편성 결과 메시지에 붙는 재편성 버튼"""
+    """팀편성 결과 메시지에 붙는 재편성/편성취소 버튼"""
 
     def __init__(self, guild_id: int):
         super().__init__(timeout=None)  # 봇이 켜져있는 동안은 계속 눌러도 되게 타임아웃 없음
@@ -245,6 +288,29 @@ class TeamFormView(discord.ui.View):
         regenerate_assignment(session)
         await interaction.response.edit_message(embed=build_team_embed(session), view=self)
 
+    @discord.ui.button(label="❌ 편성 취소", style=discord.ButtonStyle.danger)
+    async def cancel_formation(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction):
+            await interaction.response.send_message("관리자만 사용할 수 있어요.", ephemeral=True)
+            return
+
+        session = session_manager.get(self.guild_id)
+        if session is None:
+            await interaction.response.send_message("세션을 찾을 수 없어요.", ephemeral=True)
+            return
+
+        # 편성 정보 초기화 -> 다시 신청/신청취소 가능해짐
+        session.team_assignment = None
+        session.balance_method = None
+        session.formed_team_count = None
+        session.team_channel_id = None
+        session.team_message_id = None
+
+        await interaction.response.edit_message(
+            content="↩️ 편성이 취소됐어요. 다시 신청을 받을 수 있어요.", embed=None, view=None
+        )
+        await refresh_announce_message(interaction.client, session)
+
 
 class MatchCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -257,24 +323,35 @@ class MatchCog(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def reminder_loop(self):
-        """30초마다 모든 세션을 확인해서, 알림 보낼 시점이 되면 신청자 전원 멘션해서 알림 발송"""
+        """30초마다 모든 세션을 확인해서, 시작 전 알림 / 시작 시각 알림을 각각 체크해서 발송"""
         now = datetime.datetime.now(KST)
         for session in session_manager.all_sessions():
-            if session.closed or session.reminder_sent:
+            if session.closed:
                 continue
-            if session.scheduled_time is None or session.reminder_minutes is None:
+            if session.scheduled_time is None:
                 continue
 
-            remind_at = session.scheduled_time - datetime.timedelta(minutes=session.reminder_minutes)
-            if now >= remind_at:
-                await self._send_reminder(session)
-                session.reminder_sent = True
+            # 1) 시작 몇 분 전 알림
+            if not session.reminder_sent and session.reminder_minutes is not None:
+                remind_at = session.scheduled_time - datetime.timedelta(minutes=session.reminder_minutes)
+                if now >= remind_at:
+                    await self._send_prestart_reminder(session)
+                    session.reminder_sent = True
+
+            # 2) 내전 시작 시각 알림
+            if not session.start_notified and now >= session.scheduled_time:
+                await self._send_start_notification(session)
+                session.start_notified = True
 
     @reminder_loop.before_loop
     async def before_reminder_loop(self):
         await self.bot.wait_until_ready()
 
-    async def _send_reminder(self, session: MatchSession):
+    def _mention_applicants(self, session: MatchSession) -> str:
+        # 테스트 더미(음수 ID)는 멘션 제외, 실제 신청자만 멘션
+        return " ".join(f"<@{aid}>" for aid in session.applicants.keys() if aid > 0)
+
+    async def _send_prestart_reminder(self, session: MatchSession):
         if not session.announce_channel_id:
             return
         try:
@@ -282,8 +359,7 @@ class MatchCog(commands.Cog):
         except discord.HTTPException:
             return
 
-        # 테스트 더미(음수 ID)는 멘션 제외, 실제 신청자만 멘션
-        mentions = " ".join(f"<@{aid}>" for aid in session.applicants.keys() if aid > 0)
+        mentions = self._mention_applicants(session)
         ts = int(session.scheduled_time.timestamp())
         text = f"⏰ **{session.map_name} 내전 시작 {session.reminder_minutes}분 전이에요!** (<t:{ts}:t>)"
         if mentions:
@@ -293,6 +369,26 @@ class MatchCog(commands.Cog):
             sent = await channel.send(text)
             session.reminder_channel_id = sent.channel.id
             session.reminder_message_id = sent.id
+        except discord.HTTPException:
+            pass
+
+    async def _send_start_notification(self, session: MatchSession):
+        if not session.announce_channel_id:
+            return
+        try:
+            channel = self.bot.get_channel(session.announce_channel_id) or await self.bot.fetch_channel(session.announce_channel_id)
+        except discord.HTTPException:
+            return
+
+        mentions = self._mention_applicants(session)
+        text = f"🚀 **{session.map_name} 내전 시작 시간이에요!** 다들 준비해주세요."
+        if mentions:
+            text += f"\n{mentions}"
+
+        try:
+            sent = await channel.send(text)
+            session.start_channel_id = sent.channel.id
+            session.start_message_id = sent.id
         except discord.HTTPException:
             pass
 
@@ -369,7 +465,7 @@ class MatchCog(commands.Cog):
         except Exception as e:
             log.warning(f"디스코드 이벤트 생성 실패: {e}")
 
-        await interaction.response.send_message(embed=build_open_embed(session), view=OpenMatchView(interaction.guild_id, self.bot))
+        await interaction.response.send_message(embed=build_open_embed(session), view=OpenMatchView(interaction.guild_id, self.bot, session.map_name))
         sent_message = await interaction.original_response()
         session.announce_channel_id = sent_message.channel.id
         session.announce_message_id = sent_message.id
@@ -464,8 +560,9 @@ class MatchCog(commands.Cog):
             await interaction.response.send_message("이미 확정된 편성이라 수정할 수 없어요.", ephemeral=True)
             return
 
-        if not (1 <= 팀번호 <= session.team_count):
-            await interaction.response.send_message(f"팀번호는 1~{session.team_count} 사이여야 해요.", ephemeral=True)
+        team_count = session.formed_team_count or session.team_count
+        if not (1 <= 팀번호 <= team_count):
+            await interaction.response.send_message(f"팀번호는 1~{team_count} 사이여야 해요.", ephemeral=True)
             return
 
         target = None
