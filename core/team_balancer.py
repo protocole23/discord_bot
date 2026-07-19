@@ -1,5 +1,5 @@
 """
-팀 편성 로직 (랭크 점수 기준 스네이크 드래프트 / 랜덤 배분).
+팀 편성 로직 (랭크 점수 기준 순차 배분 / 랜덤 배분).
 """
 import random
 from dataclasses import dataclass
@@ -29,27 +29,21 @@ class Team:
         return self.total_rp / len(self.members) if self.members else 0
 
 
-def snake_draft(applicants: List[Applicant], team_count: int) -> List[Team]:
-    """RP 내림차순 정렬 후 스네이크 순서로 팀에 배분 (원리: 1→N→N→1 반복 배분 → 팀별 RP 합산이 최대한 비슷해짐)"""
+def rank_draft(applicants: List[Applicant], team_count: int) -> List[Team]:
+    """RP 내림차순 정렬 후 1팀→2팀→...→N팀→1팀→2팀... 순서로 순차 배분.
+    인원이 팀 개수의 배수가 아니어도, 남는 인원은 항상 1팀부터 순서대로 이어서 배치됨."""
     sorted_applicants = sorted(applicants, key=lambda a: a.rp, reverse=True)
     teams = [Team(index=i, members=[]) for i in range(team_count)]
 
-    order = list(range(team_count))
-    idx = 0
-    for applicant in sorted_applicants:
-        team_i = order[idx]
-        teams[team_i].members.append(applicant)
-
-        idx += 1
-        if idx == team_count:
-            idx = 0
-            order.reverse()  # 스네이크: 방향 반전
+    for i, applicant in enumerate(sorted_applicants):
+        teams[i % team_count].members.append(applicant)
 
     return teams
 
 
 def random_draft(applicants: List[Applicant], team_count: int) -> List[Team]:
-    """랭크 점수 무시하고 랜덤으로 섞어서 균등하게 배분 (인원수만 최대한 고르게 맞춤)"""
+    """랭크 점수 무시하고 랜덤으로 섞은 뒤 1팀→2팀→...→N팀 순서로 순차 배분.
+    (남는 인원 처리 방식은 rank_draft와 동일하게 1팀부터 순서대로)"""
     shuffled = list(applicants)
     random.shuffle(shuffled)
     teams = [Team(index=i, members=[]) for i in range(team_count)]

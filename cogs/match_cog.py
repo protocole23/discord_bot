@@ -1,3 +1,5 @@
+import random
+import math
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -10,7 +12,7 @@ import config
 from core.match_session import session_manager, MatchSession
 from core.team_balancer import (
     Applicant,
-    snake_draft,
+    rank_draft,
     random_draft,
     teams_to_assignment,
     assignment_to_teams,
@@ -98,23 +100,21 @@ async def refresh_announce_message(bot: commands.Bot, session: MatchSession):
 
 def regenerate_assignment(session: MatchSession):
     """session.balance_method 에 맞는 방식으로 팀을 다시 짜서 session.team_assignment 를 갱신한다.
-    팀 개수는 신청 인원을 팀당 인원수로 나눈 올림값으로 동적 계산하되, 맵 최대 팀 수(session.team_count)를 넘지 않는다.
-    예) 루미아섬 스쿼드(3인): 7명 -> ceil(7/3)=3팀, 24명 -> ceil(24/3)=8팀
-    모드(솔로/듀오/스쿼드)는 팀당 인원수(team_size)와 정원(capacity)에 영향을 준다."""
-    import math
-
+    팀 개수는 신청 인원에 맞춰 동적으로 늘어나되, 맵에 정해진 최대 팀 수(session.team_count)를 넘지 않는다.
+    (예: 루미아섬 듀오 모드 - 4명이면 2팀, 8명이면 4팀, ... 24명(=최대)이면 8팀)"""
     applicants = list(session.applicants.values())
     team_size = session.effective_team_size or session.team_size
+
     if applicants:
-        team_count = min(math.ceil(len(applicants) / team_size), session.team_count)
+        team_count = min(session.team_count, max(1, math.ceil(len(applicants) / team_size)))
     else:
-        team_count = 1
+        team_count = session.team_count
     session.formed_team_count = team_count
 
     if session.balance_method == "random":
         teams = random_draft(applicants, team_count)
     else:
-        teams = snake_draft(applicants, team_count)
+        teams = rank_draft(applicants, team_count)
     session.team_assignment = teams_to_assignment(teams)
 
 
@@ -621,6 +621,41 @@ class MatchCog(commands.Cog):
         await delete_session_messages(self.bot, session, interaction.guild)
         session_manager.cancel(interaction.guild_id)
         await interaction.followup.send(f"🏁 {session.map_name} 내전이 종료됐어요. 수고하셨습니다!")
+
+    # ---------------------------------------------------------------
+    @app_commands.command(name="테스트더미추가", description="[테스트용] 가짜 신청자를 채워서 팀편성을 미리 확인합니다. (관리자 전용)")
+    @app_commands.describe(인원수="추가할 가짜 신청자 수 (정원까지만 채워짐)")
+    async def add_dummy_applicants(self, interaction: discord.Interaction, 인원수: int):
+        if not is_admin(interaction):
+            await interaction.response.send_message("관리자만 사용할 수 있어요.", ephemeral=True)
+            return
+
+        session = session_manager.get(interaction.guild_id)
+        if session is None or session.closed:
+            await interaction.response.send_message("현재 진행 중인 내전이 없어요.", ephemeral=True)
+            return
+
+        added = 0
+        for _ in range(인원수):
+            if session.is_full:
+                break
+            # 실제 디스코드 유저 ID와 안 겹치도록 음수 ID 사용 (더미 구분용)
+            dummy_id = -(len(session.applicants) + 1) - random.randint(0, 100000)
+            dummy_rp = random.randint(0, 3000)
+            session.applicants[dummy_id] = Applicant(
+                discord_id=dummy_id,
+                display_name=f"더미{added+1}",
+                nickname=f"더미유저{added+1}",
+                tier="테스트",
+                rp=dummy_rp,
+            )
+            added += 1
+
+        await interaction.response.send_message(
+            f"🧪 더미 신청자 {added}명 추가됨. 현재 인원: {session.current_count}/{session.capacity}",
+            ephemeral=True,
+        )
+        await refresh_announce_message(self.bot, session)
 
 
 async def setup(bot: commands.Bot):
